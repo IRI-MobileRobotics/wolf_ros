@@ -152,8 +152,8 @@ class WolfPrunning
     public:
 
         WolfPrunning(const std::string& file_path, unsigned int max_vertex) :
-            wolf_problem_full(new WolfProblem()),
-            wolf_problem_prun(new WolfProblem()),
+            wolf_problem_full(new WolfProblem(PO_2D)),
+            wolf_problem_prun(new WolfProblem(PO_2D)),
             sensor_ptr(new SensorBase(ODOM_2D, new StateBlock(Eigen::VectorXs::Zero(2)), new StateBlock(Eigen::VectorXs::Zero(1)), new StateBlock(Eigen::VectorXs::Zero(2)), 2)),
             Sigma_11(2,2),
             Sigma_12(2,1),
@@ -405,7 +405,7 @@ class WolfPrunning
             frame_new_ptr->addCapture(capture_ptr);
             capture_ptr->addFeature(feature_ptr);
             ConstraintOdom2DAnalytic* constraint_ptr = new ConstraintOdom2DAnalytic(feature_ptr, frame_old_ptr);
-            feature_ptr->addConstraintFrom(constraint_ptr);
+            feature_ptr->addConstraint(constraint_ptr);
         }
 
         void wolfToFramesMarker(visualization_msgs::Marker& frames, WolfProblem* wolf_problem_ptr)

@@ -19,7 +19,10 @@ WolfAlgNode::WolfAlgNode(void) :
     this->loop_rate_ = 10;//in [Hz] ToDo: should be an input parameter from cfg
  
     // init wolf odom sensor 
-    odom_sensor_ptr_ = new SensorOdom2D(new StateBlock(Eigen::Vector2s::Zero()), new StateBlock(Eigen::Vector1s::Zero()), odom_std[0], odom_std[1]);//both arguments initialized on top
+    odom_sensor_ptr_ = new SensorOdom2D(new StateBlock(Eigen::Vector2s::Zero(), true),
+                                        new StateBlock(Eigen::Vector1s::Zero(), true),
+                                        odom_std[0],
+                                        odom_std[1]);//both arguments initialized on top
 
     // init lasers
     laser_sensor_ptr_ = std::vector<SensorLaser2D*>(n_lasers_, nullptr);
@@ -30,7 +33,12 @@ WolfAlgNode::WolfAlgNode(void) :
     laser_frame_name_.resize(n_lasers_);
 
     //create the manager
-    wolf_manager_ = new WolfManager(PO_2D, odom_sensor_ptr_,Eigen::Vector3s::Zero(), Eigen::Matrix3s::Identity()*0.01, window_length_, new_frame_elapsed_time_);
+    wolf_manager_ = new WolfManager(PO_2D,
+                                    odom_sensor_ptr_,
+                                    Eigen::Vector3s::Zero(),
+                                    Eigen::Matrix3s::Identity()*0.01,
+                                    window_length_,
+                                    new_frame_elapsed_time_);
     wolf_manager_->addSensor(odom_sensor_ptr_);
 
     //loads the tf of all lasers
@@ -228,7 +236,8 @@ void WolfAlgNode::mainNodeThread(void)
 
     // Sets localization timestamp & Gets wolf localization estimate
     ros::Time loc_stamp = ros::Time::now();
-    Eigen::VectorXs vehicle_pose  = wolf_manager_->getVehiclePose();
+    Eigen::VectorXs vehicle_pose = wolf_manager_->getVehiclePose();
+    //std::cout << "vehicle_pose computed" << std::endl;
 
     // Broadcast transform ---------------------------------------------------------------------------
     //Get map2base from Wolf result, and builds base2map pose
@@ -580,7 +589,8 @@ void WolfAlgNode::loadLaserTf(const unsigned int laser_idx)
         std::cout << "LIDAR " << laser_idx << ": " << laser_frame_name_[laser_idx] << ": " << laser_sensor_pose.transpose() << std::endl;
 
         //set wolf states and sensors
-        laser_sensor_ptr_[laser_idx] = new SensorLaser2D(new StateBlock(laser_sensor_pose.head(2)), new StateBlock(laser_sensor_pose.tail(1)));
+        laser_sensor_ptr_[laser_idx] = new SensorLaser2D(new StateBlock(laser_sensor_pose.head(2), true),
+                                                         new StateBlock(laser_sensor_pose.tail(1), true));
         wolf_manager_->addSensor(laser_sensor_ptr_[laser_idx]);
         laser_sensor_ptr_[laser_idx]->addProcessor(new ProcessorLaser2D());
         laser_tf_loaded_[laser_idx] = true;
