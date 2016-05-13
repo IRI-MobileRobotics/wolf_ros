@@ -29,7 +29,8 @@ find_package(catkin REQUIRED COMPONENTS iri_base_algorithm visualization_msgs na
 #           Add system and labrobotica dependencies here
 # ******************************************************************** 
 find_package(Ceres REQUIRED)
-find_package(laser_scan_utils REQUIRED)
+find_package(laser_scan_utils QUIET)
+find_package(raw_gps_utils QUIET)
 find_package(wolf REQUIRED)
 
 # ******************************************************************** 
@@ -94,6 +95,7 @@ include_directories(include
                     ${catkin_INCLUDE_DIRS}
                     ${CERES_INCLUDE_DIRS}
                     ${laser_scan_utils_INCLUDE_DIRS}
+                    ${raw_gps_utils_INCLUDE_DIRS}
                     ${wolf_INCLUDE_DIRS})
 message("wolf_INCLUDE_DIRS: ${wolf_INCLUDE_DIRS}")
 message("laser_scan_utils_INCLUDE_DIRS: ${laser_scan_utils_INCLUDE_DIRS}")
@@ -104,6 +106,7 @@ message("laser_scan_utils_INCLUDE_DIRS: ${laser_scan_utils_INCLUDE_DIRS}")
 ## Declare a cpp executable
 add_executable(${PROJECT_NAME} src/wolf_alg.cpp src/wolf_alg_node.cpp)
 add_executable(wolf_prunning src/wolf_prunning_test.cpp)
+add_executable(wolf_ros_node src/wolf_node.cpp src/wolf_main.cpp)
 
 # ******************************************************************** 
 #                   Add the libraries
@@ -115,6 +118,11 @@ target_link_libraries(${PROJECT_NAME} ${wolf_LIBRARY})
 target_link_libraries(wolf_prunning ${catkin_LIBRARIES})
 target_link_libraries(wolf_prunning ${CERES_LIBRARIES})
 target_link_libraries(wolf_prunning ${wolf_LIBRARY})
+target_link_libraries(wolf_ros_node ${catkin_LIBRARIES})
+target_link_libraries(wolf_ros_node ${Ceres_LIBRARIES})
+target_link_libraries(wolf_ros_node ${laser_scan_utils_LIBRARY})
+target_link_libraries(wolf_ros_node ${raw_gps_utils_LIBRARY})
+target_link_libraries(wolf_ros_node ${wolf_LIBRARY})
 
 # ******************************************************************** 
 #               Add message headers dependencies 
@@ -123,6 +131,9 @@ target_link_libraries(wolf_prunning ${wolf_LIBRARY})
 add_dependencies(${PROJECT_NAME} visualization_msgs_generate_messages_cpp)
 add_dependencies(${PROJECT_NAME} nav_msgs_generate_messages_cpp)
 add_dependencies(${PROJECT_NAME} sensor_msgs_generate_messages_cpp)
+add_dependencies(wolf_ros_node visualization_msgs_generate_messages_cpp)
+add_dependencies(wolf_ros_node nav_msgs_generate_messages_cpp)
+add_dependencies(wolf_ros_node sensor_msgs_generate_messages_cpp)
 
 # ******************************************************************** 
 #               Add dynamic reconfigure dependencies 
