@@ -80,13 +80,8 @@ protected:
     tf::TransformBroadcaster tfb_;
     tf::TransformListener    tfl_;
     std::string base_frame_name_;
-    std::string gps_frame_name_;
-    std::string world_frame_name_;
     std::string map_frame_name_;
     std::string odom_frame_name_;
-
-    //only for visualization reasons
-    std::string map_initial_frame_name_;
 
     //Odometry callback
     ros::Time last_odom_stamp_;
@@ -97,7 +92,7 @@ protected:
     std::vector<ros::Subscriber> laser_subscribers_;
     void laserCallback(const sensor_msgs::LaserScan::ConstPtr& msg);
     void loadLaserIntrinsics(const unsigned int laser_idx, const sensor_msgs::LaserScan::ConstPtr& msg);
-    bool loadLaserExtrinsics(const unsigned int laser_idx, Eigen::VectorXs& _extrinsics);
+    bool loadSensorExtrinsics(const std::string _sensor_frame, Eigen::VectorXs& _extrinsics);
 
     //transforms
     tf::TransformBroadcaster tfb_;
@@ -107,17 +102,14 @@ protected:
     tf::Transform T_map2odom_; //to be broadcasted by this node
 
     // [publisher attributes]
-    ros::Publisher lines_publisher_;
-    visualization_msgs::MarkerArray lines_MarkerArray_msg_;
-
     ros::Publisher constraints_publisher_;
-    visualization_msgs::Marker constraints_Marker_msg_;
+    visualization_msgs::Marker constraints_marker_msg_;
 
-    ros::Publisher corners_publisher_;
-    visualization_msgs::MarkerArray corners_MarkerArray_msg_;
+    ros::Publisher landmarks_publisher_;
+    visualization_msgs::MarkerArray landmark_marker_array_msg_;
 
     ros::Publisher vehicle_publisher_;
-    visualization_msgs::MarkerArray vehicle_MarkerArray_msg_;
+    visualization_msgs::MarkerArray trajectory_marker_array_msg_;
 
     // ROS node handle
     ros::NodeHandle nh_;
