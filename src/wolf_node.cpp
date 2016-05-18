@@ -4,18 +4,21 @@
 
 #include "wolf_node.h"
 
-WolfNode::WolfNode() :
+WolfNode::WolfNode(char *argv0) :
     nh_(ros::this_node::getName()),
     problem_(wolf::FRM_PO_2D),
+    origin_cov_(Eigen::Matrix3s::Zero()),
+    origin_set_(false),
     ceres_manager_(&problem_),
-    vehicle_pose_(3)
+    vehicle_pose_(3),
+    last_odom_stamp_(ros::Time(0))
 {
     //std::cout << "WolfNode::WolfNode(...) -- constructor\n";
 
     // parameters
     bool use_wolf_auto_diff;
     int max_iterations, n_lasers;
-    double odom_std[2];
+    double odom_std[2], origin_covs[3];
     nh_.param<bool>("use_wolf_auto_diff", use_wolf_auto_diff, true);
     nh_.param<int>("max_iterations", max_iterations, 1);
     nh_.param<int>("n_lasers", n_lasers, 6);
@@ -24,12 +27,12 @@ WolfNode::WolfNode() :
     nh_.param<std::string>("base_frame_name", base_frame_name_, "agv_base_link");
     nh_.param<std::string>("map_frame_name_", map_frame_name_, "map");
     nh_.param<std::string>("odom_frame_name_", odom_frame_name_, "odom");
-
-    // Initial frame
-    //TODO get prior and prior_cov from nh_.param
-    Eigen::Vector3s prior = Eigen::Vector3s(0, 0, 0);//prior pose of base in map
-    Eigen::Matrix3s prior_cov = Eigen::Matrix3s::Identity() * 0.1;//prior pose covariance of base in map
-    problem_.setOrigin(prior, prior_cov, wolf::TimeStamp(ros::Time::now().toSec()));
+    nh_.param<double>("origin_covariance_xx", origin_covs[0], 0.1);
+    nh_.param<double>("origin_covariance_yy", origin_covs[1], 0.1);
+    nh_.param<double>("origin_covariance_thth", origin_covs[2], 0.1);
+    origin_cov_(0,0) = origin_covs[0];
+    origin_cov_(1,1) = origin_covs[1];
+    origin_cov_(2,2) = origin_covs[2];
 
     // [init publishers]
     // Broadcast 0 transform map-odom
@@ -39,11 +42,12 @@ WolfNode::WolfNode() :
     tfb_.sendTransform( T_map2odom_);
 
     // [init subscribers]
-    odom_sub_ = nh_.subscribe("/teo/odomfused", 10, &WolfNode::odometryCallback, this);
+    odom_sub_ = nh_.subscribe("odometry", 10, &WolfNode::odometryCallback, this);
 
     // set ceres options
     ceres_manager_.getSolverOptions().max_num_iterations = max_iterations;
     ceres_manager_.setUseWolfAutoDiff(use_wolf_auto_diff);
+    //google::InitGoogleLogging(argv0);
 
     // Install sensors and processors
     // odometry
@@ -66,8 +70,8 @@ WolfNode::WolfNode() :
         //build name
         lidar_frame_name_ii.str("");
         lidar_frame_name_ii << "laser_" << ii << "_frame_name";
-        nh_.param<std::string>(lidar_frame_name_ii.str(), laser_frame_name_[ii]);
-        //std::cout << "setting laser " << ii << "tf. frame id: " << laser_frame_name_[ii] << std::endl;
+        nh_.param<std::string>(lidar_frame_name_ii.str(), laser_frame_name_[ii], "laser_i_frame_id");
+        std::cout << "setting laser " << ii << " tf. frame id: " << laser_frame_name_[ii] << std::endl;
 
         // store id-name map
         laser_frame_2_idx_[laser_frame_name_[ii]] = ii;
@@ -92,7 +96,7 @@ WolfNode::WolfNode() :
     // [init publishers]
     constraints_publisher_ = nh_.advertise<visualization_msgs::Marker>("constraints", 2);
     landmarks_publisher_ = nh_.advertise<visualization_msgs::MarkerArray>("corners", 2);
-    vehicle_publisher_ = nh_.advertise<visualization_msgs::MarkerArray>("vehicle", 2);
+    trajectory_publisher_ = nh_.advertise<visualization_msgs::MarkerArray>("vehicle", 2);
 
     // init MARKERS
     // init constraint markers message
@@ -106,42 +110,52 @@ WolfNode::WolfNode() :
     constraints_marker_msg_.ns = "/constraints";
     constraints_marker_msg_.id = 1;
 
-    // Init vehicle_MarkerArray_msg with a first RED CUBE marker representing the vehicle at agv_base_link.
-    visualization_msgs::Marker vehicle_head_marker;
-    vehicle_head_marker.header.stamp = ros::Time::now();
-    vehicle_head_marker.header.frame_id = base_frame_name_;
-    vehicle_head_marker.type = visualization_msgs::Marker::CUBE;
-    vehicle_head_marker.scale.x = 10;
-    vehicle_head_marker.scale.y = 3;
-    vehicle_head_marker.scale.z = 3;
-    vehicle_head_marker.color.r = 1; //red
-    vehicle_head_marker.color.g = 0;
-    vehicle_head_marker.color.b = 0;
-    vehicle_head_marker.color.a = 1;
-    vehicle_head_marker.pose.position.x = 0.0;
-    vehicle_head_marker.pose.position.y = 0.0;
-    vehicle_head_marker.pose.position.z = 1.5;
-    vehicle_head_marker.pose.orientation = tf::createQuaternionMsgFromYaw(0.0);
-    vehicle_head_marker.id = 0;
-    trajectory_marker_array_msg_.markers.push_back(vehicle_head_marker);
+    // Init vehicle_marker and create the first RED CUBE
+    vehicle_marker_.header.stamp = ros::Time::now();
+    vehicle_marker_.header.frame_id = base_frame_name_;
+    vehicle_marker_.type = visualization_msgs::Marker::CUBE;
+    vehicle_marker_.scale.x = 10;
+    vehicle_marker_.scale.y = 3;
+    vehicle_marker_.scale.z = 3;
+    vehicle_marker_.color.r = 1; //red
+    vehicle_marker_.color.g = 0;
+    vehicle_marker_.color.b = 0;
+    vehicle_marker_.color.a = 1;
+    vehicle_marker_.pose.position.x = 0.0;
+    vehicle_marker_.pose.position.y = 0.0;
+    vehicle_marker_.pose.position.z = 1.5;
+    vehicle_marker_.pose.orientation = tf::createQuaternionMsgFromYaw(0.0);
+    vehicle_marker_.id = 0;
+    trajectory_marker_array_msg_.markers.push_back(vehicle_marker_);
+    vehicle_marker_.color.r = 1; //yellow
+    vehicle_marker_.color.g = 1;
+    vehicle_marker_.color.b = 0;
+    vehicle_marker_.color.a = 1;
 
-    /*// Init the rest of the vehicle_MarkerArray_msg with YELLOW CUBE markers, with neither pose nor stamp
-    visualization_msgs::Marker vehicle_trajectory_marker;
-    vehicle_trajectory_marker.header.frame_id = "map";
-    vehicle_trajectory_marker.type = visualization_msgs::Marker::CUBE;
-    vehicle_trajectory_marker.scale.x = 10;
-    vehicle_trajectory_marker.scale.y = 3;
-    vehicle_trajectory_marker.scale.z = 3;
-    vehicle_trajectory_marker.color.r = 1;//yellow
-    vehicle_trajectory_marker.color.g = 1;//yellow
-    vehicle_trajectory_marker.color.b = 0;
-    vehicle_trajectory_marker.color.a = 0.0; //no show at while no true frame
-    vehicle_trajectory_marker.pose.position.x = 0.0;
-    vehicle_trajectory_marker.pose.position.y = 0.0;
-    vehicle_trajectory_marker.pose.position.z = 1.5;
-    vehicle_trajectory_marker.id = 1; //0 already taken by the current vehicle
-    trajectory_marker_array_msg_.markers.push_back(vehicle_trajectory_marker); */
+    // Init landmark markers
+    landmark_marker_.header.stamp = ros::Time::now();
+    landmark_marker_.header.frame_id = map_frame_name_;
+    landmark_marker_.type = visualization_msgs::Marker::CUBE;
+    landmark_marker_.ns = "/landmarks";
+    landmark_text_marker_.header.stamp = ros::Time::now();
+    landmark_text_marker_.header.frame_id = map_frame_name_;
+    landmark_text_marker_.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+    landmark_text_marker_.ns = "/landmarks";
+    landmark_text_marker_.color.r = 1;
+    landmark_text_marker_.color.g = 1;
+    landmark_text_marker_.color.b = 1;
+    landmark_text_marker_.color.a = 1;
+    landmark_text_marker_.scale.z = 1;
 
+    // Initial frame
+    unsigned int attempts = 0;
+    while (!setOrigin() && attempts < 100)
+    {
+        usleep(1e4);
+        attempts++;
+    }
+    if (attempts == 100)
+        ROS_ERROR("WolfNode: Didn't receive odometry tf");
 
     ROS_INFO("STARTING IRI WOLF...");
 }
@@ -156,7 +170,7 @@ WolfNode::~WolfNode()
 void WolfNode::solve()
 {
     // Solving ---------------------------------------------------------------------------
-    //ROS_INFO("================ SOLVING ==================");
+    ROS_INFO("================ SOLVING ==================");
     //ros::Time local_stamp = ros::Time::now();
 
     ceres::Solver::Summary summary = ceres_manager_.solve();
@@ -164,11 +178,11 @@ void WolfNode::solve()
     //std::cout << summary.FullReport() << std::endl;
     std::cout << summary.BriefReport() << std::endl;
 
-    // Update transforms ---------------------------------------------------------------------------
-
+    // Broadcast transforms ---------------------------------------------------------------------------
+    broadcastTf();
 
     // MARKERS VEHICLE & CONSTRAINTS ---------------------------------------------------------------------------
-    // [...]
+    publishMarkers();
 }
 
 void WolfNode::broadcastTf()
@@ -182,12 +196,13 @@ void WolfNode::broadcastTf()
     T_map2base_.setOrigin( tf::Vector3((double) vehicle_pose_(0), (double) vehicle_pose_(1), 0) );
     T_map2base_.setRotation( tf::createQuaternionFromYaw((double) vehicle_pose_(2)) );
 
-    //std::cout << "Loc: (" << vehicle_pose(0) << "," << vehicle_pose(1) << "," << vehicle_pose(2) << ")" << std::endl;
+    //std::cout << "Vehicle pose: " << vehicle_pose_.transpose() << std::endl;
 
     //gets T_map2odom_ (odom wrt map), by using tf listener, and assuming an odometry node is broadcasting odom2base
     if ( tfl_.waitForTransform(base_frame_name_, odom_frame_name_, loc_stamp, ros::Duration(0.1)) )
     {
         tfl_.lookupTransform(base_frame_name_, odom_frame_name_, loc_stamp, T_base2odom_);
+        //std::cout << "Odometry: " << T_base2odom_.inverse().getOrigin().getX() << " " << T_base2odom_.inverse().getOrigin().getY() << " " << T_base2odom_.inverse().getRotation().getAngle() << std::endl;
         T_map2odom_.setData(T_map2base_ * T_base2odom_);
         T_map2odom_.stamp_ = loc_stamp;
 
@@ -198,12 +213,147 @@ void WolfNode::broadcastTf()
         ROS_WARN("No odom to base frame received");
 }
 
+void WolfNode::publishMarkers()
+{
+    ros::Time marker_stamp = ros::Time::now();
+
+    // MARKERS VEHICLE & CONSTRAINTS
+    wolf::ConstraintBaseList ctr_list;
+    constraints_marker_msg_.points.clear();
+    constraints_marker_msg_.header.stamp = marker_stamp;
+    unsigned int ii = 1; //start to 1 to do not modify vehicle_MarkerArray_msg_.marker[0], since it is already at agv_base_link
+    geometry_msgs::Point point1, point2;
+    for (auto frm_ptr : (*problem_.getTrajectoryPtr()->getFrameListPtr())) //runs the list of frames in reverse order, from the head (current) to the tail (former)
+    {
+        // KEY FRAMES
+        if (frm_ptr->isKey())
+        {
+            if (trajectory_marker_array_msg_.markers.size() > ii)
+                trajectory_marker_array_msg_.markers[ii].action = visualization_msgs::Marker::MODIFY;
+            else
+            {
+                trajectory_marker_array_msg_.markers.push_back(vehicle_marker_);
+                trajectory_marker_array_msg_.markers[ii].action = visualization_msgs::Marker::ADD;
+                trajectory_marker_array_msg_.markers[ii].id = ii;
+            }
+            trajectory_marker_array_msg_.markers[ii].header.stamp = marker_stamp;
+            trajectory_marker_array_msg_.markers[ii].header.frame_id = "map";
+            trajectory_marker_array_msg_.markers[ii].pose.position.x = frm_ptr->getPPtr()->getVector()(0);
+            trajectory_marker_array_msg_.markers[ii].pose.position.y = frm_ptr->getPPtr()->getVector()(1);
+            trajectory_marker_array_msg_.markers[ii].pose.orientation = tf::createQuaternionMsgFromYaw( frm_ptr->getOPtr()->getVector()(0) );
+            trajectory_marker_array_msg_.markers[ii].color.a = 0.5; //Show with little transparency
+        }
+
+        // CONSTRAINTS
+        ctr_list.clear();
+        frm_ptr->getConstraintList(ctr_list);
+        for (auto c_ptr : ctr_list)
+        {
+            switch (c_ptr->getCategory())
+            {
+                // Odometry
+                case wolf::CTR_FRAME:
+                {
+                    // from
+                    point1.x = frm_ptr->getPPtr()->getVector()(0);
+                    point1.y = frm_ptr->getPPtr()->getVector()(1);
+                    point1.z = 0.25;
+                    // to
+                    point2.x = c_ptr->getFrameOtherPtr()->getPPtr()->getVector()(0);
+                    point2.y = c_ptr->getFrameOtherPtr()->getPPtr()->getVector()(1);
+                    point2.z = 0.25;
+                    break;
+                }
+                // Landmarks
+                case wolf::CTR_LANDMARK:
+                {
+                    // from
+                    point1.x = frm_ptr->getPPtr()->getVector()(0);
+                    point1.y = frm_ptr->getPPtr()->getVector()(1);
+                    point1.z = 0.25;
+                    // to
+                    point2.x = c_ptr->getLandmarkOtherPtr()->getPPtr()->getVector()(0);
+                    point2.y = c_ptr->getLandmarkOtherPtr()->getPPtr()->getVector()(1);
+                    point2.z = 1.5;
+                    break;
+                }
+            }
+            constraints_marker_msg_.header.stamp = marker_stamp;
+            constraints_marker_msg_.points.push_back(point1);
+            constraints_marker_msg_.points.push_back(point2);
+        }
+
+        ii++;
+    }
+
+    // MARKERS LANDMARKS
+    ii = 0;
+    landmark_marker_array_msg_.markers.clear();
+    for (auto l_ptr : *(problem_.getMapPtr()->getLandmarkListPtr()))
+    {
+        landmark_marker_.header.stamp = marker_stamp;
+        landmark_marker_.color.r = (double)l_ptr->getHits()/10;
+        landmark_marker_.color.g = 0;
+        landmark_marker_.color.b = 1 - (double)l_ptr->getHits()/10;
+        landmark_marker_.color.a = 0.5;//0.3 + 0.7*((double)l_ptr->getHits()/10);
+        landmark_marker_.id = 2*ii;
+
+
+        if (l_ptr->getType() == wolf::LANDMARK_CORNER)
+        {
+            landmark_marker_.scale.x = 1.5;
+            landmark_marker_.scale.y = 0.2;
+            landmark_marker_.scale.z = 3;
+
+            landmark_marker_.pose.position.x = l_ptr->getPPtr()->getVector()(0) + landmark_marker_.scale.x / 2 * cos(l_ptr->getOPtr()->getVector()(0));
+            landmark_marker_.pose.position.y = l_ptr->getPPtr()->getVector()(1) + landmark_marker_.scale.x / 2 * sin(l_ptr->getOPtr()->getVector()(0));
+            landmark_marker_.pose.position.z = landmark_marker_.scale.z / 2;
+            landmark_marker_.pose.orientation = tf::createQuaternionMsgFromYaw(l_ptr->getOPtr()->getVector()(0));
+
+
+        }
+        else if (l_ptr->getType() == wolf::LANDMARK_CONTAINER)
+        {
+            landmark_marker_.scale.x = l_ptr->getDescriptor()(1);
+            landmark_marker_.scale.y = l_ptr->getDescriptor()(0);
+            landmark_marker_.scale.z = 3;
+
+            landmark_marker_.pose.position.x = l_ptr->getPPtr()->getVector()(0);
+            landmark_marker_.pose.position.y = l_ptr->getPPtr()->getVector()(1);
+            landmark_marker_.pose.position.z = landmark_marker_.scale.z / 2;
+            landmark_marker_.pose.orientation = tf::createQuaternionMsgFromYaw(l_ptr->getOPtr()->getVector()(0));
+
+        }
+        landmark_marker_array_msg_.markers.push_back(landmark_marker_);
+
+        landmark_text_marker_.pose.position = landmark_marker_.pose.position;
+        landmark_text_marker_.pose.position.z = 3;
+        landmark_text_marker_.id = 2*ii+1;
+        landmark_text_marker_.text = std::to_string(l_ptr->id());
+
+        landmark_marker_array_msg_.markers.push_back(landmark_text_marker_);
+
+        ii++;
+    }
+
+
+    trajectory_publisher_.publish(trajectory_marker_array_msg_);
+    landmarks_publisher_.publish(landmark_marker_array_msg_);
+    constraints_publisher_.publish(constraints_marker_msg_);
+}
+
 void WolfNode::odometryCallback(const nav_msgs::Odometry::ConstPtr& msg)
 {
-    ////ROS_INFO("WolfAlgNode::odometry_callback: New Message Received");
-    odom_capture_ptr_->setTimeStamp(wolf::TimeStamp(msg->header.stamp.sec, msg->header.stamp.nsec));
-    odom_capture_ptr_->setData(Eigen::Vector2s(msg->twist.twist.linear.x, msg->twist.twist.angular.z));
-    odom_capture_ptr_->process();
+    //ROS_INFO("WolfNode::odometry_callback: New Message Received");
+
+    if (last_odom_stamp_ != ros::Time(0))
+    {
+        wolf::Scalar dt = (msg->header.stamp - last_odom_stamp_).toSec();
+        odom_capture_ptr_->setTimeStamp(wolf::TimeStamp(msg->header.stamp.sec, msg->header.stamp.nsec));
+        odom_capture_ptr_->setData(Eigen::Vector2s(msg->twist.twist.linear.x*dt, msg->twist.twist.angular.z*dt));
+        odom_capture_ptr_->process();
+    }
+    last_odom_stamp_ = msg->header.stamp;
 }
 
 const wolf::Problem& WolfNode::getProblem()
@@ -213,7 +363,7 @@ const wolf::Problem& WolfNode::getProblem()
 
 void WolfNode::laserCallback(const sensor_msgs::LaserScan::ConstPtr& msg)
 {
-    //ROS_INFO("WolfAlgNode::laser_front_left_callback: New Message Received");
+    //ROS_INFO("WolfNode::laserCallback: New Message Received");
 
     //get the id from the message header
     unsigned int lidar_id = laser_frame_2_idx_[msg->header.frame_id];
@@ -264,7 +414,7 @@ void WolfNode::loadLaserIntrinsics(const unsigned int _laser_idx, const sensor_m
 bool WolfNode::loadSensorExtrinsics(const std::string _sensor_frame, Eigen::VectorXs& _extrinsics)
 {
     //look up for transform from base to ibeo
-    //std::cout << "waiting for transform: " << _sensor_frame << std::endl;
+    std::cout << "WolfNode::loadSensorExtrinsics: waiting transform " << _sensor_frame << std::endl;
     if ( tfl_.waitForTransform(base_frame_name_, _sensor_frame, ros::Time(0), ros::Duration(1.)) )
     {
         tf::StampedTransform base_2_sensor;
@@ -275,6 +425,33 @@ bool WolfNode::loadSensorExtrinsics(const std::string _sensor_frame, Eigen::Vect
         //Set mounting frame. Fill translation part
         _extrinsics << base_2_sensor.getOrigin().x(), base_2_sensor.getOrigin().y(), tf::getYaw(base_2_sensor.getRotation());
         //std::cout << _sensor_frame << ": " << << base_2_sensor.transpose() << std::endl;
+
+        return true;
+    }
+    return false;
+}
+
+bool WolfNode::setOrigin()
+{
+    //look up for transform from odom 2 base
+    if ( tfl_.waitForTransform(base_frame_name_, odom_frame_name_, ros::Time(0), ros::Duration(1)) )
+    {
+        // Get first odometry
+        tfl_.lookupTransform(base_frame_name_, odom_frame_name_, ros::Time(0), T_base2odom_);
+        std::cout << "WolfNode::setOrigin: First odometry: " << T_base2odom_.inverse().getOrigin().getX() << T_base2odom_.inverse().getOrigin().getY() << tf::getYaw(T_base2odom_.inverse().getRotation()) << std::endl;
+
+        // set wolf origin
+        Eigen::Vector3s prior = Eigen::Vector3s(T_base2odom_.inverse().getOrigin().getX(), T_base2odom_.inverse().getOrigin().getY(), tf::getYaw(T_base2odom_.inverse().getRotation()));//prior pose of base in map
+        problem_.setOrigin(prior, origin_cov_, wolf::TimeStamp(ros::Time::now().toSec()));
+
+        // set transformations
+        T_map2base_ = T_base2odom_.inverse();
+        T_map2odom_.setOrigin( tf::Vector3(0,0,0) );
+        T_map2odom_.setRotation( tf::createQuaternionFromYaw(0) );
+        T_map2odom_.stamp_ = ros::Time::now();
+
+        //broadcast T_map2odom_
+        tfb_.sendTransform( T_map2odom_ );
 
         return true;
     }

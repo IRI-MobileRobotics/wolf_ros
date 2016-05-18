@@ -35,6 +35,7 @@
  *     CERES includes     *
  **************************/
 #include "wolf/ceres_wrapper/ceres_manager.h"
+#include "glog/logging.h"
 
 /**************************
  *      ROS includes      *
@@ -58,15 +59,19 @@
 class WolfNode
 {
     public:
-        WolfNode();
+        WolfNode(char *argv0);
         virtual ~WolfNode();
 
         void solve();
         const wolf::Problem& getProblem();
+        void broadcastTf();
+        void publishMarkers();
 
     protected:
         //wolf problem
         wolf::Problem problem_;
+        bool origin_set_;
+        Eigen::Matrix3s origin_cov_;
 
         //Wolf: laser sensors
         std::vector<wolf::SensorLaser2D*> laser_sensor_ptr_;
@@ -88,9 +93,9 @@ class WolfNode
         std::string map_frame_name_;
         std::string odom_frame_name_;
         Eigen::VectorXs vehicle_pose_;
-        void broadcastTf();
 
         //Odometry
+        ros::Time last_odom_stamp_;
         ros::Subscriber odom_sub_; // odometry subscriber
         void odometryCallback(const nav_msgs::Odometry::ConstPtr& msg);
         wolf::CaptureMotion2* odom_capture_ptr_;
@@ -102,6 +107,7 @@ class WolfNode
 
 
         bool loadSensorExtrinsics(const std::string _sensor_frame, Eigen::VectorXs& _extrinsics);
+        bool setOrigin();
 
         // [publisher attributes]
         ros::Publisher constraints_publisher_;
@@ -109,9 +115,11 @@ class WolfNode
 
         ros::Publisher landmarks_publisher_;
         visualization_msgs::MarkerArray landmark_marker_array_msg_;
+        visualization_msgs::Marker landmark_marker_, landmark_text_marker_;
 
-        ros::Publisher vehicle_publisher_;
+        ros::Publisher trajectory_publisher_;
         visualization_msgs::MarkerArray trajectory_marker_array_msg_;
+        visualization_msgs::Marker vehicle_marker_;
 
         // ROS node handle
         ros::NodeHandle nh_;

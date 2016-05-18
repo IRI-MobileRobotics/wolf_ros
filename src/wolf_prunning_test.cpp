@@ -16,6 +16,7 @@
 #include <queue>
 
 //Wolf includes
+#include "wolf/constraint_base.h"
 #include "wolf/wolf_manager.h"
 #include "wolf/capture_void.h"
 #include "wolf/ceres_wrapper/ceres_manager.h"
@@ -128,7 +129,7 @@ class WolfPrunning
         SensorBase* sensor_ptr;
 
         // prunning
-        std::list<ConstraintBase*> ordered_ctr_ptr;
+        ConstraintBaseList ordered_ctr_ptr;
         std::list<Scalar> ordered_ig;
         Eigen::MatrixXs Sigma_11, Sigma_12, Sigma_13, Sigma_14,
                         Sigma_22, Sigma_23, Sigma_24,

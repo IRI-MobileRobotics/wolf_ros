@@ -13,7 +13,7 @@ int main(int argc, char **argv)
     ros::init(argc, argv, "wolf_node");
 
     // Wolf ROS node
-    WolfNode wolf_node;
+    WolfNode wolf_node(argv[0]);
 
     ros::Time last_solved = ros::Time::now();
 
@@ -25,14 +25,14 @@ int main(int argc, char **argv)
         ros::spinOnce();
 
         // solve every 1 seconds
-        if((ros::Time::now()- last_solved).toSec() > 1) //TODO: change to different threads for solving and getting odometry
+        if((ros::Time::now()- last_solved).toSec() > 1)
         {
             last_solved = ros::Time::now();
             wolf_node.solve();
         }
-
-        // get the odometry
-        //TODO
+        // broadcast transformations
+        else
+            wolf_node.broadcastTf();
 
         //relax to fit output rate
         loopRate.sleep();

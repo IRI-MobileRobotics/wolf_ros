@@ -51,6 +51,8 @@
 
 // [action server client headers]
 
+using namespace wolf;
+
 /**
  * \brief IRI ROS Specific Algorithm Class
  *
