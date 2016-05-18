@@ -24,6 +24,8 @@
 #include "ceres/ceres.h"
 #include "glog/logging.h"
 
+using namespace wolf;
+
 class FrameCostFunctor
 {
     protected:
@@ -31,7 +33,7 @@ class FrameCostFunctor
         Eigen::Map<Eigen::Vector2s> reference_point_;
 
     public:
-        FrameCostFunctor(WolfScalar* _fitted_point_ptr, WolfScalar* _reference_point_ptr) :
+        FrameCostFunctor(Scalar* _fitted_point_ptr, Scalar* _reference_point_ptr) :
             fitted_point_(_fitted_point_ptr),
             reference_point_(_reference_point_ptr)
     {
@@ -57,7 +59,7 @@ class TrajectoryICP
         std::vector<Eigen::Map<Eigen::Vector3s>> frames_poses_;
 
     public:
-        TrajectoryICP(WolfProblem* fitted_problem, WolfProblem* reference_problem) :
+        TrajectoryICP(Problem* fitted_problem, Problem* reference_problem) :
             correction_(Eigen::Vector3d::Zero())
         {
             solver_options_.minimizer_progress_to_stdout = false;
@@ -121,13 +123,13 @@ class WolfPrunning
         std::vector<Eigen::VectorXs> priors_vector;
 
         // Wolf problem
-        WolfProblem* wolf_problem_full;
-        WolfProblem* wolf_problem_prun;
+        Problem* wolf_problem_full;
+        Problem* wolf_problem_prun;
         SensorBase* sensor_ptr;
 
         // prunning
         std::list<ConstraintBase*> ordered_ctr_ptr;
-        std::list<WolfScalar> ordered_ig;
+        std::list<Scalar> ordered_ig;
         Eigen::MatrixXs Sigma_11, Sigma_12, Sigma_13, Sigma_14,
                         Sigma_22, Sigma_23, Sigma_24,
                         Sigma_33, Sigma_34,
@@ -142,8 +144,6 @@ class WolfPrunning
 
         // Ceres wrapper
         ceres::Solver::Summary summary_full, summary_prun;
-        ceres::Solver::Options ceres_options;
-        ceres::Problem::Options problem_options;
         CeresManager* ceres_manager_full;
         CeresManager* ceres_manager_prun;
         SensorBase* prior_sensor_ptr;
@@ -152,9 +152,9 @@ class WolfPrunning
     public:
 
         WolfPrunning(const std::string& file_path, unsigned int max_vertex) :
-            wolf_problem_full(new WolfProblem(PO_2D)),
-            wolf_problem_prun(new WolfProblem(PO_2D)),
-            sensor_ptr(new SensorBase(ODOM_2D, new StateBlock(Eigen::VectorXs::Zero(2)), new StateBlock(Eigen::VectorXs::Zero(1)), new StateBlock(Eigen::VectorXs::Zero(2)), 2)),
+            wolf_problem_full(new Problem(FRM_PO_2D)),
+            wolf_problem_prun(new Problem(FRM_PO_2D)),
+            sensor_ptr(new SensorBase(SEN_ODOM_2D, new StateBlock(Eigen::VectorXs::Zero(2)), new StateBlock(Eigen::VectorXs::Zero(1)), new StateBlock(Eigen::VectorXs::Zero(2)), 2)),
             Sigma_11(2,2),
             Sigma_12(2,1),
             Sigma_13(2,2),
@@ -168,17 +168,13 @@ class WolfPrunning
             Sigma_z(3,3),
             jacobians({Eigen::MatrixXs::Zero(3,2), Eigen::MatrixXs::Zero(3,1), Eigen::MatrixXs::Zero(3,2), Eigen::MatrixXs::Zero(3,1)}),
             trajectory_icp(nullptr),
-            ceres_manager_full(new CeresManager(wolf_problem_full, problem_options)),
-            ceres_manager_prun(new CeresManager(wolf_problem_prun, problem_options)),
-            prior_sensor_ptr(new SensorBase(ABSOLUTE_POSE, nullptr, nullptr, nullptr, 0)),
-            edge_sensor_ptr(new SensorBase(ODOM_2D, new StateBlock(Eigen::VectorXs::Zero(2)), new StateBlock(Eigen::VectorXs::Zero(1)), new StateBlock(Eigen::VectorXs::Zero(2)), 2))
+            ceres_manager_full(new CeresManager(wolf_problem_full)),
+            ceres_manager_prun(new CeresManager(wolf_problem_prun)),
+            prior_sensor_ptr(new SensorBase(SEN_ABSOLUTE_POSE, nullptr, nullptr, nullptr, 0)),
+            edge_sensor_ptr(new SensorBase(SEN_ODOM_2D, new StateBlock(Eigen::VectorXs::Zero(2)), new StateBlock(Eigen::VectorXs::Zero(1)), new StateBlock(Eigen::VectorXs::Zero(2)), 2))
         {
-            ceres_options.minimizer_type = ceres::TRUST_REGION; //ceres::TRUST_REGION;LINE_SEARCH
-            ceres_options.max_line_search_step_contraction = 1e-3;
-            ceres_options.max_num_iterations = 1e4;
-            problem_options.cost_function_ownership = ceres::DO_NOT_TAKE_OWNERSHIP;
-            problem_options.loss_function_ownership = ceres::TAKE_OWNERSHIP;
-            problem_options.local_parameterization_ownership = ceres::TAKE_OWNERSHIP;
+            ceres_manager_full->getSolverOptions().max_num_iterations = 1e4;
+            ceres_manager_prun->getSolverOptions().max_num_iterations = 1e4;
 
             // LOAD GRAPH
             if (max_vertex == 0) max_vertex = 1e6;
@@ -199,12 +195,6 @@ class WolfPrunning
 
             // BUILD ICP
             trajectory_icp = new TrajectoryICP(wolf_problem_prun, wolf_problem_full);
-
-            // BUILD SOLVER PROBLEM
-            std::cout << "updating ceres..." << std::endl;
-            ceres_manager_full->update();
-            ceres_manager_prun->update();
-            std::cout << "updated!" << std::endl;
 
             // COMPUTE COVARIANCES
             // whole covariance computation
@@ -400,7 +390,7 @@ class WolfPrunning
 
         void addEdgeToProblem(const Eigen::Vector3s& edge_vector, const Eigen::Matrix3s& edge_information, FrameBase* frame_old_ptr, FrameBase* frame_new_ptr)
         {
-            FeatureBase* feature_ptr = new FeatureBase(edge_vector, edge_information.inverse());
+            FeatureBase* feature_ptr = new FeatureBase(FEATURE_CORNER, edge_vector, edge_information.inverse());
             CaptureVoid* capture_ptr = new CaptureVoid(TimeStamp(0), edge_sensor_ptr);
             frame_new_ptr->addCapture(capture_ptr);
             capture_ptr->addFeature(feature_ptr);
@@ -408,7 +398,7 @@ class WolfPrunning
             feature_ptr->addConstraint(constraint_ptr);
         }
 
-        void wolfToFramesMarker(visualization_msgs::Marker& frames, WolfProblem* wolf_problem_ptr)
+        void wolfToFramesMarker(visualization_msgs::Marker& frames, Problem* wolf_problem_ptr)
         {
             frames.points.clear();
             frames.header.stamp = ros::Time::now();
@@ -424,7 +414,7 @@ class WolfPrunning
             }
         }
 
-        void wolfToConstraintsMarker(visualization_msgs::Marker& constraints, WolfProblem* wolf_problem_ptr)
+        void wolfToConstraintsMarker(visualization_msgs::Marker& constraints, Problem* wolf_problem_ptr)
         {
             constraints.points.clear();
             constraints.header.stamp = ros::Time::now();
@@ -485,7 +475,7 @@ class WolfPrunning
                 Eigen::MatrixXs& J4 = jacobians[3];
 
                 // Information gain
-                WolfScalar IG = 0.5 * log( Sigma_z.determinant() /
+                Scalar IG = 0.5 * log( Sigma_z.determinant() /
                                           (Sigma_z - (J1 * Sigma_11 * J1.transpose() +
                                                       J1 * Sigma_12 * J2.transpose() +
                                                       J1 * Sigma_13 * J3.transpose() +
@@ -529,9 +519,9 @@ class WolfPrunning
             FrameBase* frame_other = ctr_ptr->getFrameOtherPtr();
 
             // Is it connected to another inactive constraint?
-            std::list<ConstraintBase*> connected_constraints_list = (*frame_own->getConstraintToListPtr());
+            std::list<ConstraintBase*> connected_constraints_list = (*frame_own->getConstrainedByListPtr());
             frame_own->getConstraintList(connected_constraints_list);
-            connected_constraints_list.insert (connected_constraints_list.end(),frame_other->getConstraintToListPtr()->begin(),frame_other->getConstraintToListPtr()->end());
+            connected_constraints_list.insert (connected_constraints_list.end(),frame_other->getConstrainedByListPtr()->begin(),frame_other->getConstrainedByListPtr()->end());
             frame_other->getConstraintList(connected_constraints_list);
 
             for (auto c_it : connected_constraints_list)
@@ -550,7 +540,7 @@ class WolfPrunning
             while (!pending_spread_frames.empty())
             {
                 connected_constraints_list.clear();
-                connected_constraints_list = (*pending_spread_frames.front()->getConstraintToListPtr());
+                connected_constraints_list = (*pending_spread_frames.front()->getConstrainedByListPtr());
                 pending_spread_frames.front()->getConstraintList(connected_constraints_list);
 
                 for (auto c_it : connected_constraints_list)
@@ -603,7 +593,7 @@ class WolfPrunning
             while (!pending_spread_frames.empty())
             {
                 connected_constraints_list.clear();
-                connected_constraints_list = (*pending_spread_frames.front()->getConstraintToListPtr());
+                connected_constraints_list = (*pending_spread_frames.front()->getConstrainedByListPtr());
                 pending_spread_frames.front()->getConstraintList(connected_constraints_list);
 
                 for (auto c_it : connected_constraints_list)
@@ -646,7 +636,6 @@ class WolfPrunning
             // RESET CONSTRAINTS (ACTIVE ALL)
             for (auto c_it : ordered_ctr_ptr)
                 c_it->setStatus(CTR_ACTIVE);
-            ceres_manager_prun->update();
 
             // RESET PRIORS
             for (auto i = 0; i< priors_vector.size(); i++)
@@ -670,7 +659,6 @@ class WolfPrunning
                 else if (isRemovable(*c_it))
                     (*c_it)->setStatus(CTR_INACTIVE);
 
-            ceres_manager_prun->update();
             t_prunning = ((double) clock() - t1) / CLOCKS_PER_SEC;
 
             // CHECKING INTEGRITY
@@ -680,7 +668,7 @@ class WolfPrunning
             for (auto fr_it : *(wolf_problem_prun->getTrajectoryPtr()->getFrameListPtr()) )
             {
                 unsigned int n_constraints = 0;
-                connected_constraints_list = (*fr_it->getConstraintToListPtr());
+                connected_constraints_list = (*fr_it->getConstrainedByListPtr());
                 fr_it->getConstraintList(connected_constraints_list);
 
                 for (auto c_it : connected_constraints_list)
@@ -698,11 +686,11 @@ class WolfPrunning
 
             // SOLVING PROBLEMS
             t1 = clock();
-            summary_full = ceres_manager_full->solve(ceres_options);
+            summary_full = ceres_manager_full->solve();
             t_solve_full = ((double) clock() - t1) / CLOCKS_PER_SEC;
             //std::cout << summary_full.BriefReport() << std::endl;
             t1 = clock();
-            summary_prun = ceres_manager_prun->solve(ceres_options);
+            summary_prun = ceres_manager_prun->solve();
             t_solve_prun = ((double) clock() - t1) / CLOCKS_PER_SEC;
             //std::cout << summary_prun.BriefReport() << std::endl;
 

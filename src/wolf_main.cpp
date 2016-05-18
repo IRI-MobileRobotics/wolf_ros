@@ -12,11 +12,10 @@ int main(int argc, char **argv)
     // Init ROS
     ros::init(argc, argv, "wolf_node");
 
-    // Wolf GPS ROS node
-    WolfNode wolf_node();
+    // Wolf ROS node
+    WolfNode wolf_node;
 
     ros::Time last_solved = ros::Time::now();
-    wolf_node.solve();
 
     ros::Rate loopRate(10);
 

@@ -101,41 +101,42 @@ message("wolf_INCLUDE_DIRS: ${wolf_INCLUDE_DIRS}")
 message("laser_scan_utils_INCLUDE_DIRS: ${laser_scan_utils_INCLUDE_DIRS}")
                     
 ## Declare a cpp library
-# add_library(${PROJECT_NAME} <list of source files>)
+add_library(wolf_ros_lib src/wolf_node.cpp)
 
 ## Declare a cpp executable
-add_executable(${PROJECT_NAME} src/wolf_alg.cpp src/wolf_alg_node.cpp)
+#add_executable(${PROJECT_NAME} src/wolf_alg.cpp src/wolf_alg_node.cpp)
 add_executable(wolf_prunning src/wolf_prunning_test.cpp)
-add_executable(wolf_ros_node src/wolf_node.cpp src/wolf_main.cpp)
+add_executable(${PROJECT_NAME} src/wolf_main.cpp)
 
 # ******************************************************************** 
 #                   Add the libraries
 # ******************************************************************** 
-target_link_libraries(${PROJECT_NAME} ${catkin_LIBRARIES})
-target_link_libraries(${PROJECT_NAME} ${Ceres_LIBRARIES})
-target_link_libraries(${PROJECT_NAME} ${laser_scan_utils_LIBRARY})
-target_link_libraries(${PROJECT_NAME} ${wolf_LIBRARY})
+#target_link_libraries(${PROJECT_NAME} ${catkin_LIBRARIES})
+#target_link_libraries(${PROJECT_NAME} ${Ceres_LIBRARIES})
+#target_link_libraries(${PROJECT_NAME} ${laser_scan_utils_LIBRARY})
+#target_link_libraries(${PROJECT_NAME} ${wolf_LIBRARY})
 target_link_libraries(wolf_prunning ${catkin_LIBRARIES})
 target_link_libraries(wolf_prunning ${CERES_LIBRARIES})
 target_link_libraries(wolf_prunning ${wolf_LIBRARY})
-target_link_libraries(wolf_ros_node ${catkin_LIBRARIES})
-target_link_libraries(wolf_ros_node ${Ceres_LIBRARIES})
-target_link_libraries(wolf_ros_node ${laser_scan_utils_LIBRARY})
-target_link_libraries(wolf_ros_node ${raw_gps_utils_LIBRARY})
-target_link_libraries(wolf_ros_node ${wolf_LIBRARY})
+target_link_libraries(${PROJECT_NAME} wolf_ros_lib)
+target_link_libraries(${PROJECT_NAME} ${catkin_LIBRARIES})
+target_link_libraries(${PROJECT_NAME} ${Ceres_LIBRARIES})
+target_link_libraries(${PROJECT_NAME} ${laser_scan_utils_LIBRARY})
+target_link_libraries(${PROJECT_NAME} ${raw_gps_utils_LIBRARY})
+target_link_libraries(${PROJECT_NAME} ${wolf_LIBRARY})
 
 # ******************************************************************** 
 #               Add message headers dependencies 
 # ******************************************************************** 
 # add_dependencies(${PROJECT_NAME} <msg_package_name>_generate_messages_cpp)
+#add_dependencies(${PROJECT_NAME} visualization_msgs_generate_messages_cpp)
+#add_dependencies(${PROJECT_NAME} nav_msgs_generate_messages_cpp)
+#add_dependencies(${PROJECT_NAME} sensor_msgs_generate_messages_cpp)
 add_dependencies(${PROJECT_NAME} visualization_msgs_generate_messages_cpp)
 add_dependencies(${PROJECT_NAME} nav_msgs_generate_messages_cpp)
 add_dependencies(${PROJECT_NAME} sensor_msgs_generate_messages_cpp)
-add_dependencies(wolf_ros_node visualization_msgs_generate_messages_cpp)
-add_dependencies(wolf_ros_node nav_msgs_generate_messages_cpp)
-add_dependencies(wolf_ros_node sensor_msgs_generate_messages_cpp)
 
 # ******************************************************************** 
 #               Add dynamic reconfigure dependencies 
 # ******************************************************************** 
-add_dependencies(${PROJECT_NAME} ${${PROJECT_NAME}_EXPORTED_TARGETS})
+#add_dependencies(${PROJECT_NAME} ${${PROJECT_NAME}_EXPORTED_TARGETS})

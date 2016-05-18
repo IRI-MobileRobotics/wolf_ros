@@ -44,7 +44,9 @@
 #include <tf/transform_listener.h>
 
 #include <nav_msgs/Odometry.h>
+#include <sensor_msgs/LaserScan.h>
 #include <visualization_msgs/Marker.h>
+#include <visualization_msgs/MarkerArray.h>
 
 /**************************
  *      STD includes      *
@@ -55,64 +57,64 @@
 
 class WolfNode
 {
-public:
-    WolfNode();
-    virtual ~WolfNode();
+    public:
+        WolfNode();
+        virtual ~WolfNode();
 
-protected:
-    //wolf problem
-    wolf::Problem problem_;
+        void solve();
+        const wolf::Problem& getProblem();
 
-    //Wolf: laser sensors
-    std::vector<wolf::SensorLaser2D*> laser_sensor_ptr_;
-    std::vector<bool> laser_intrinsics_set_;
-    std::vector<bool> laser_extrinsics_set_;
-    std::vector<std::string> laser_frame_name_;
-    std::map<std::string,unsigned int> laser_frame_2_idx_;
+    protected:
+        //wolf problem
+        wolf::Problem problem_;
 
-    //ceres
-    wolf::CeresManager ceres_manager_;
+        //Wolf: laser sensors
+        std::vector<wolf::SensorLaser2D*> laser_sensor_ptr_;
+        std::vector<bool> laser_intrinsics_set_;
+        std::vector<bool> laser_extrinsics_set_;
+        std::vector<std::string> laser_frame_name_;
+        std::map<std::string,unsigned int> laser_frame_2_idx_;
 
-    void solve();
-    const wolf::Problem& getProblem();
+        //ceres
+        wolf::CeresManager ceres_manager_;
 
-    //transforms
-    tf::TransformBroadcaster tfb_;
-    tf::TransformListener    tfl_;
-    std::string base_frame_name_;
-    std::string map_frame_name_;
-    std::string odom_frame_name_;
+        //transforms
+        tf::TransformBroadcaster tfb_;
+        tf::TransformListener    tfl_;
+        tf::Transform T_map2base_; //wolf output
+        tf::StampedTransform T_base2odom_; //published by odom source
+        tf::StampedTransform T_map2odom_; //to be broadcasted by this node
+        std::string base_frame_name_;
+        std::string map_frame_name_;
+        std::string odom_frame_name_;
+        Eigen::VectorXs vehicle_pose_;
+        void broadcastTf();
 
-    //Odometry callback
-    ros::Time last_odom_stamp_;
-    ros::Subscriber odom_sub_; // odometry subscriber
-    void odometryCallback(const nav_msgs::Odometry::ConstPtr& msg);
+        //Odometry
+        ros::Subscriber odom_sub_; // odometry subscriber
+        void odometryCallback(const nav_msgs::Odometry::ConstPtr& msg);
+        wolf::CaptureMotion2* odom_capture_ptr_;
 
-    // Lasers callback
-    std::vector<ros::Subscriber> laser_subscribers_;
-    void laserCallback(const sensor_msgs::LaserScan::ConstPtr& msg);
-    void loadLaserIntrinsics(const unsigned int laser_idx, const sensor_msgs::LaserScan::ConstPtr& msg);
-    bool loadSensorExtrinsics(const std::string _sensor_frame, Eigen::VectorXs& _extrinsics);
+        // Lasers
+        std::vector<ros::Subscriber> laser_subscribers_;
+        void laserCallback(const sensor_msgs::LaserScan::ConstPtr& msg);
+        void loadLaserIntrinsics(const unsigned int laser_idx, const sensor_msgs::LaserScan::ConstPtr& msg);
 
-    //transforms
-    tf::TransformBroadcaster tfb_;
-    tf::TransformListener    tfl_;
-    tf::Transform T_map2base_; //wolf output
-    tf::Transform T_odom2base_; //published by odom source
-    tf::Transform T_map2odom_; //to be broadcasted by this node
 
-    // [publisher attributes]
-    ros::Publisher constraints_publisher_;
-    visualization_msgs::Marker constraints_marker_msg_;
+        bool loadSensorExtrinsics(const std::string _sensor_frame, Eigen::VectorXs& _extrinsics);
 
-    ros::Publisher landmarks_publisher_;
-    visualization_msgs::MarkerArray landmark_marker_array_msg_;
+        // [publisher attributes]
+        ros::Publisher constraints_publisher_;
+        visualization_msgs::Marker constraints_marker_msg_;
 
-    ros::Publisher vehicle_publisher_;
-    visualization_msgs::MarkerArray trajectory_marker_array_msg_;
+        ros::Publisher landmarks_publisher_;
+        visualization_msgs::MarkerArray landmark_marker_array_msg_;
 
-    // ROS node handle
-    ros::NodeHandle nh_;
+        ros::Publisher vehicle_publisher_;
+        visualization_msgs::MarkerArray trajectory_marker_array_msg_;
+
+        // ROS node handle
+        ros::NodeHandle nh_;
 };
 
 #endif //WOLF_ROS_WOLF_GPS_NODE_H
