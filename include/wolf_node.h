@@ -72,6 +72,7 @@ class WolfNode
         wolf::Problem problem_;
         bool origin_set_;
         Eigen::Matrix3s origin_cov_;
+        ros::Time origin_stamp_;
 
         //Wolf: laser sensors
         std::vector<wolf::SensorLaser2D*> laser_sensor_ptr_;
