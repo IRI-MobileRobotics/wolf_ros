@@ -25,13 +25,13 @@ int main(int argc, char **argv)
         ros::spinOnce();
 
         // solve every 1 seconds
-        if((ros::Time::now()- last_solved).toSec() > 0.1)
-        {
-            last_solved = ros::Time::now();
-            wolf_node.solve();
-        }
-        // broadcast transformations
-        else
+//        if((ros::Time::now()- last_solved).toSec() > 0.1)
+//        {
+//            last_solved = ros::Time::now();
+//            wolf_node.solve();
+//        }
+//        // broadcast transformations
+//        else
             wolf_node.broadcastTf();
 
         //relax to fit output rate

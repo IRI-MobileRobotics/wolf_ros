@@ -11,17 +11,20 @@ WolfNode::WolfNode(char *argv0) :
     origin_set_(false),
     ceres_manager_(&problem_),
     vehicle_pose_(3),
-    last_odom_stamp_(ros::Time(0))
+    last_odom_stamp_(ros::Time(0)),
+    last_odom_seq_(0)
 {
-    //std::cout << "WolfNode::WolfNode(...) -- constructor\n";
+    std::cout << "WolfNode::WolfNode(...) -- constructor\n";
 
     // parameters
     bool use_wolf_auto_diff;
-    int max_iterations, n_lasers;
+    int max_iterations, n_lasers, new_corners_th, loop_frames_th;
     double odom_std[2], origin_covs[3];
     nh_.param<bool>("use_wolf_auto_diff", use_wolf_auto_diff, true);
     nh_.param<int>("max_iterations", max_iterations, 1e3);
     nh_.param<int>("n_lasers", n_lasers, 6);
+    nh_.param<int>("new_corners_th", new_corners_th, 3);
+    nh_.param<int>("loop_frames_th", loop_frames_th, 3);
     nh_.param<double>("odometry_translational_std", odom_std[0], 0.2);
     nh_.param<double>("odometry_rotational_std", odom_std[1], 0.2);
     nh_.param<std::string>("base_frame_name", base_frame_name_, "agv_base_link");
@@ -50,6 +53,7 @@ WolfNode::WolfNode(char *argv0) :
     //google::InitGoogleLogging(argv0);
 
     // Install sensors and processors
+    ROS_INFO("0");
     // odometry
     wolf::IntrinsicsOdom2D odom_intrinsics;
     odom_intrinsics.k_disp_to_disp = odom_std[0];
@@ -59,13 +63,15 @@ WolfNode::WolfNode(char *argv0) :
     odom_capture_ptr_ = new wolf::CaptureMotion2(wolf::TimeStamp(), odom_sensor_ptr, Eigen::Vector2s::Zero(), Eigen::Matrix2s::Zero());
 
     // lasers
+    ROS_INFO("1");
     laser_sensor_ptr_ = std::vector<wolf::SensorLaser2D*>(n_lasers, nullptr);
+    laser_processor_ptr_ = std::vector<wolf::ProcessorTrackerLandmarkCorner*>(n_lasers, nullptr);
     laser_intrinsics_set_= std::vector<bool>(n_lasers, false);
     laser_extrinsics_set_= std::vector<bool>(n_lasers, false);
     laser_subscribers_.resize(n_lasers);
     laser_frame_name_.resize(n_lasers);
     std::stringstream lidar_frame_name_ii, lidar_processor_name_ii, lidar_topic_name_ii;
-    for (unsigned int ii = 0; ii<n_lasers; ii++)
+    for (auto ii = 0; ii<n_lasers; ii++)
     {
         //build names
         lidar_frame_name_ii.str("");
@@ -89,8 +95,9 @@ WolfNode::WolfNode(char *argv0) :
         // install processor
         wolf::ProcessorParamsLaser laser_processor_params;
         laser_processor_params.line_finder_params_ = laserscanutils::LineFinderIterativeParams({0.1, 5});
-        laser_processor_params.n_corners_th = 10;
-        problem_.installProcessor("LASER 2D", lidar_processor_name_ii.str(), lidar_frame_name_ii.str(), &laser_processor_params);
+        laser_processor_params.new_corners_th = new_corners_th;
+        laser_processor_params.loop_frames_th = loop_frames_th;
+        laser_processor_ptr_[ii] = (wolf::ProcessorTrackerLandmarkCorner*)problem_.installProcessor("LASER 2D", lidar_processor_name_ii.str(), lidar_frame_name_ii.str(), &laser_processor_params);
 
         //init lidar subscribers
         lidar_topic_name_ii.str("");
@@ -104,6 +111,7 @@ WolfNode::WolfNode(char *argv0) :
     trajectory_publisher_ = nh_.advertise<visualization_msgs::MarkerArray>("vehicle", 2);
 
     // init MARKERS
+    ROS_INFO("2");
     // init constraint markers message
     constraints_marker_msg_.type = visualization_msgs::Marker::LINE_LIST;
     constraints_marker_msg_.header.frame_id = "map";
@@ -116,7 +124,7 @@ WolfNode::WolfNode(char *argv0) :
     constraints_marker_msg_.id = 1;
 
     // Init vehicle_marker and create the first RED CUBE
-    vehicle_marker_.header.stamp = ros::Time::now();
+    ROS_INFO("3");
     vehicle_marker_.header.frame_id = base_frame_name_;
     vehicle_marker_.type = visualization_msgs::Marker::CUBE;
     vehicle_marker_.scale.x = 10;
@@ -138,11 +146,12 @@ WolfNode::WolfNode(char *argv0) :
     vehicle_marker_.color.a = 1;
 
     // Init landmark markers
-    landmark_marker_.header.stamp = ros::Time::now();
+    ROS_INFO("4");
     landmark_marker_.header.frame_id = map_frame_name_;
     landmark_marker_.type = visualization_msgs::Marker::CUBE;
     landmark_marker_.ns = "/landmarks";
-    landmark_text_marker_.header.stamp = ros::Time::now();
+    landmark_marker_.scale.z = 3;
+    landmark_marker_.pose.position.z = landmark_marker_.scale.z / 2;
     landmark_text_marker_.header.frame_id = map_frame_name_;
     landmark_text_marker_.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
     landmark_text_marker_.ns = "/landmarks";
@@ -152,6 +161,21 @@ WolfNode::WolfNode(char *argv0) :
     landmark_text_marker_.color.a = 1;
     landmark_text_marker_.scale.z = 1;
 
+    // Init feature markers
+    ROS_INFO("5");
+    features_marker_array_msg_.resize(n_lasers);
+    features_publisher_.resize(n_lasers);
+    feature_marker_.type = visualization_msgs::Marker::CUBE;
+    feature_marker_.scale.x = 1.5;
+    feature_marker_.scale.y = 0.4;
+    feature_marker_.scale.z = 1;
+    feature_marker_.pose.position.z = feature_marker_.scale.z / 2;
+    feature_marker_.color.a = 1;
+    feature_marker_.ns = "/features";
+    ROS_INFO("6");
+    for (auto ii = 0; ii<n_lasers; ii++)
+        features_publisher_[ii] = nh_.advertise<visualization_msgs::MarkerArray>(("features"+ std::to_string(ii)), 2);
+    ROS_INFO("STARTING IRI WOLF...");
     // Initial frame
     unsigned int attempts = 0;
     while (!setOrigin() && attempts < 100)
@@ -180,8 +204,8 @@ void WolfNode::solve()
     //ROS_INFO("================ SOLVING ==================");
 
     ceres::Solver::Summary summary = ceres_manager_.solve();
-    std::cout << "------------------------- SOLVED -------------------------" << std::endl;
-    std::cout << summary.BriefReport() << std::endl; //summary.FullReport()
+    //std::cout << "------------------------- SOLVED -------------------------" << std::endl;
+    //std::cout << summary.BriefReport() << std::endl; //summary.FullReport()
 
     // Broadcast transforms ---------------------------------------------------------------------------
     broadcastTf();
@@ -192,18 +216,21 @@ void WolfNode::solve()
 
 void WolfNode::broadcastTf()
 {
-    ROS_INFO("================ broadcastTf ==================");
+    //ROS_INFO("================ broadcastTf ==================");
 
     // get current vehicle pose
-    ros::Time loc_stamp = ros::Time::now();
-    problem_.getCurrentState(vehicle_pose_);
+    ros::Time loc_stamp;
+    wolf::TimeStamp loc_ts;
+    problem_.getCurrentState(vehicle_pose_, loc_ts);
+    loc_stamp.nsec = loc_ts.getNanoSeconds();
+    loc_stamp.sec = loc_ts.getSeconds();
 
     // Broadcast transform ---------------------------------------------------------------------------
     //Get map2base from Wolf result, and builds base2map pose
     T_map2base_.setOrigin( tf::Vector3((double) vehicle_pose_(0), (double) vehicle_pose_(1), 0) );
     T_map2base_.setRotation( tf::createQuaternionFromYaw((double) vehicle_pose_(2)) );
 
-    //std::cout << "Vehicle pose: " << vehicle_pose_.transpose() << std::endl;
+    std::cout << "Vehicle pose: " << vehicle_pose_.transpose() << std::endl;
 
     //gets T_map2odom_ (odom wrt map), by using tf listener, and assuming an odometry node is broadcasting odom2base
     if ( tfl_.waitForTransform(base_frame_name_, odom_frame_name_, loc_stamp, ros::Duration(0.1)) )
@@ -312,11 +339,9 @@ void WolfNode::publishMarkers()
         {
             landmark_marker_.scale.x = 1.5;
             landmark_marker_.scale.y = 0.2;
-            landmark_marker_.scale.z = 3;
 
             landmark_marker_.pose.position.x = l_ptr->getPPtr()->getVector()(0) + landmark_marker_.scale.x / 2 * cos(l_ptr->getOPtr()->getVector()(0));
             landmark_marker_.pose.position.y = l_ptr->getPPtr()->getVector()(1) + landmark_marker_.scale.x / 2 * sin(l_ptr->getOPtr()->getVector()(0));
-            landmark_marker_.pose.position.z = landmark_marker_.scale.z / 2;
             landmark_marker_.pose.orientation = tf::createQuaternionMsgFromYaw(l_ptr->getOPtr()->getVector()(0));
 
 
@@ -325,11 +350,9 @@ void WolfNode::publishMarkers()
         {
             landmark_marker_.scale.x = l_ptr->getDescriptor()(1);
             landmark_marker_.scale.y = l_ptr->getDescriptor()(0);
-            landmark_marker_.scale.z = 3;
 
             landmark_marker_.pose.position.x = l_ptr->getPPtr()->getVector()(0);
             landmark_marker_.pose.position.y = l_ptr->getPPtr()->getVector()(1);
-            landmark_marker_.pose.position.z = landmark_marker_.scale.z / 2;
             landmark_marker_.pose.orientation = tf::createQuaternionMsgFromYaw(l_ptr->getOPtr()->getVector()(0));
 
         }
@@ -351,9 +374,55 @@ void WolfNode::publishMarkers()
     constraints_publisher_.publish(constraints_marker_msg_);
 }
 
+void WolfNode::publishProcessorMarkers(const unsigned int _lidar_id)
+{
+    //ROS_INFO("================ publishProcessorMarkers ==================");
+
+    // MARKERS FEATURES
+    unsigned int ii = 0;
+    features_marker_array_msg_[_lidar_id].markers.clear();
+    for (auto feat_ptr : laser_processor_ptr_[_lidar_id]->getNewFeaturesListLast())
+        if (feat_ptr->getType() == wolf::FEATURE_CORNER)
+        {
+            feature_marker_.header.frame_id = laser_frame_name_[_lidar_id];
+            feature_marker_.header.stamp = ros::Time::now();
+            feature_marker_.id = features_marker_array_msg_[_lidar_id].markers.size();
+            feature_marker_.color.r = 0;
+            feature_marker_.color.g = 1;
+            feature_marker_.color.b = 1;
+            feature_marker_.pose.position.x = feat_ptr->getMeasurement(0) + feature_marker_.scale.x / 2 * cos(feat_ptr->getMeasurement(2));
+            feature_marker_.pose.position.y = feat_ptr->getMeasurement(1) + feature_marker_.scale.x / 2 * sin(feat_ptr->getMeasurement(2));
+            feature_marker_.pose.orientation = tf::createQuaternionMsgFromYaw(feat_ptr->getMeasurement(2));
+
+            features_marker_array_msg_[_lidar_id].markers.push_back(feature_marker_);
+            features_marker_array_msg_[_lidar_id].markers.back().action = visualization_msgs::Marker::ADD;
+        }
+
+    for (auto feat_ptr : *(laser_processor_ptr_[_lidar_id]->getLastPtr()->getFeatureListPtr()))
+        if (feat_ptr->getType() == wolf::FEATURE_CORNER)
+        {
+            feature_marker_.header.frame_id = laser_frame_name_[_lidar_id];
+            feature_marker_.header.stamp = ros::Time::now();
+            feature_marker_.id = features_marker_array_msg_[_lidar_id].markers.size();
+            feature_marker_.color.r = 0;
+            feature_marker_.color.g = 1;
+            feature_marker_.color.b = 0;
+            feature_marker_.pose.position.x = feat_ptr->getMeasurement(0) + feature_marker_.scale.x / 2 * cos(feat_ptr->getMeasurement(2));
+            feature_marker_.pose.position.y = feat_ptr->getMeasurement(1) + feature_marker_.scale.x / 2 * sin(feat_ptr->getMeasurement(2));
+            feature_marker_.pose.orientation = tf::createQuaternionMsgFromYaw(feat_ptr->getMeasurement(2));
+
+            features_marker_array_msg_[_lidar_id].markers.push_back(feature_marker_);
+            features_marker_array_msg_[_lidar_id].markers.back().action = visualization_msgs::Marker::ADD;
+        }
+    features_publisher_[_lidar_id].publish(features_marker_array_msg_[_lidar_id]);
+}
+
 void WolfNode::odometryCallback(const nav_msgs::Odometry::ConstPtr& msg)
 {
     //ROS_INFO("WolfNode::odometry_callback: New Message Received");
+
+    if (msg->header.seq - last_odom_seq_ > 1)
+        ROS_ERROR("WolfNode::odometryCallback: LOST ODOMETRY MESSAGE!");
 
     if (last_odom_stamp_ != ros::Time(0))
     {
@@ -363,6 +432,7 @@ void WolfNode::odometryCallback(const nav_msgs::Odometry::ConstPtr& msg)
         odom_capture_ptr_->process();
     }
     last_odom_stamp_ = msg->header.stamp;
+    last_odom_seq_ = msg->header.seq;
 }
 
 const wolf::Problem& WolfNode::getProblem()
@@ -404,6 +474,7 @@ void WolfNode::laserCallback(const sensor_msgs::LaserScan::ConstPtr& msg)
             wolf::CaptureLaser2D* new_capture = new wolf::CaptureLaser2D(wolf::TimeStamp(msg->header.stamp.sec, msg->header.stamp.nsec),
                                                                          laser_sensor_ptr_[lidar_id], msg->ranges);
             new_capture->process();
+            publishProcessorMarkers(lidar_id);
         }
         //std::cout << "capture added" << std::endl;
     }
@@ -477,3 +548,5 @@ bool WolfNode::setOrigin()
     return true;
 
 }
+
+

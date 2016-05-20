@@ -25,6 +25,8 @@
         <param name="use_auto_diff_wrapper" value="$(arg use_auto_diff_wrapper)"/>
         <param name="k_sigmas_ut" value="2"/>
         <param name="n_lasers" value="2"/>
+        <param name="new_corners_th" value="3"/>
+        <param name="loop_frames_th" value="10"/>
         <param name="max_iterations" value="10"/>
         <param name="laser_0_frame_name" value="agv_sl_lidar"/>
         <param name="laser_1_frame_name" value="agv_sr_lidar"/>

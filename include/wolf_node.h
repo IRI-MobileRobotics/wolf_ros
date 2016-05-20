@@ -66,6 +66,7 @@ class WolfNode
         const wolf::Problem& getProblem();
         void broadcastTf();
         void publishMarkers();
+        void publishProcessorMarkers(const unsigned int _lidar_id);
 
     protected:
         //wolf problem
@@ -76,6 +77,7 @@ class WolfNode
 
         //Wolf: laser sensors
         std::vector<wolf::SensorLaser2D*> laser_sensor_ptr_;
+        std::vector<wolf::ProcessorTrackerLandmarkCorner*> laser_processor_ptr_;
         std::vector<bool> laser_intrinsics_set_;
         std::vector<bool> laser_extrinsics_set_;
         std::vector<std::string> laser_frame_name_;
@@ -100,6 +102,7 @@ class WolfNode
         ros::Subscriber odom_sub_; // odometry subscriber
         void odometryCallback(const nav_msgs::Odometry::ConstPtr& msg);
         wolf::CaptureMotion2* odom_capture_ptr_;
+        unsigned int last_odom_seq_;
 
         // Lasers
         std::vector<ros::Subscriber> laser_subscribers_;
@@ -117,6 +120,10 @@ class WolfNode
         ros::Publisher landmarks_publisher_;
         visualization_msgs::MarkerArray landmark_marker_array_msg_;
         visualization_msgs::Marker landmark_marker_, landmark_text_marker_;
+
+        std::vector<ros::Publisher> features_publisher_;
+        std::vector<visualization_msgs::MarkerArray> features_marker_array_msg_;
+        visualization_msgs::Marker feature_marker_;
 
         ros::Publisher trajectory_publisher_;
         visualization_msgs::MarkerArray trajectory_marker_array_msg_;
