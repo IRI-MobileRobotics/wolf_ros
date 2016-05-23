@@ -230,7 +230,7 @@ void WolfNode::broadcastTf()
     T_map2base_.setOrigin( tf::Vector3((double) vehicle_pose_(0), (double) vehicle_pose_(1), 0) );
     T_map2base_.setRotation( tf::createQuaternionFromYaw((double) vehicle_pose_(2)) );
 
-    std::cout << "Vehicle pose: " << vehicle_pose_.transpose() << std::endl;
+    //std::cout << "Vehicle pose: " << vehicle_pose_.transpose() << std::endl;
 
     //gets T_map2odom_ (odom wrt map), by using tf listener, and assuming an odometry node is broadcasting odom2base
     if ( tfl_.waitForTransform(base_frame_name_, odom_frame_name_, loc_stamp, ros::Duration(0.1)) )
